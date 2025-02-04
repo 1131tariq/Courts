@@ -6,3 +6,13 @@
 //
 
 import Foundation
+
+struct Chat: Identifiable {
+    let id = UUID()
+    let name: String
+    let messages: [Message]
+    
+    var lastMessage: Message? {
+        messages.last
+    }
+}

@@ -9,7 +9,37 @@ import SwiftUI
 
 struct HomeView: View {
     var body: some View {
-        Text(/*@START_MENU_TOKEN@*/"Hello, World!"/*@END_MENU_TOKEN@*/)
+        ScrollView {
+            VStack(spacing: 16) {
+                HomeCard(title: "Edit Your Player Preferences", subtitle: "Best hand, court side, match type...", color: .blue)
+                HomeCard(title: "Book Your Court", subtitle: "Reserve a paddle tennis court now!", color: .green)
+                HomeCard(title: "Matchmaking", subtitle: "Find and play with other players.", color: .orange)
+                HomeCard(title: "Tournaments", subtitle: "Join and compete in tournaments.", color: .red)
+                HomeCard(title: "Classes", subtitle: "Improve your game with professional training.", color: .purple)
+            }
+            .padding()
+        }
+    }
+}
+
+struct HomeCard: View {
+    let title: String
+    let subtitle: String
+    let color: Color
+    
+    var body: some View {
+        VStack(alignment: .leading) {
+            Text(title)
+                .font(.headline)
+                .foregroundColor(.white)
+            Text(subtitle)
+                .font(.subheadline)
+                .foregroundColor(.white.opacity(0.8))
+        }
+        .padding()
+        .frame(maxWidth: .infinity, minHeight: 100)
+        .background(color)
+        .cornerRadius(12)
     }
 }
 

@@ -8,8 +8,32 @@
 import SwiftUI
 
 struct ProfileView: View {
+    @EnvironmentObject var authViewModel: AuthViewModel
+    
     var body: some View {
-        Text(/*@START_MENU_TOKEN@*/"Hello, World!"/*@END_MENU_TOKEN@*/)
+        VStack {
+            if let user = authViewModel.user {
+                Text("\(user.first_name ?? "") \(user.last_name ?? "")")
+                    .font(.title)
+                    .bold()
+                    .padding()
+                Text(user.email)
+                    .font(.subheadline)
+                    .foregroundColor(.gray)
+                    .padding(.bottom)
+                
+                Button("Logout") {
+                    authViewModel.logout()
+                }
+                .padding()
+                .background(Color.red)
+                .foregroundColor(.white)
+                .cornerRadius(8)
+            } else {
+                Text("Loading profile...")
+            }
+        }
+        .padding()
     }
 }
 

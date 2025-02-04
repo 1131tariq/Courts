@@ -1,22 +1,20 @@
-import express from "express"; // application
-import morgan from "morgan"; // logger
-import bodyParser from "body-parser"; //parser
+import express from "express";
+import morgan from "morgan";
+import bodyParser from "body-parser";
 import env from "dotenv";
-import pg from "pg"; //Database
-import bcrypt from "bcrypt"; //Encryption and Hashing
-import session from "express-session"; // Session & Cookie Management
-import passport from "passport"; //Authentication
-import { Strategy } from "passport-local"; //Authentication Strategy
-import GoogleStrategy from "passport-google-oauth2";
+import pg from "pg";
+import bcrypt from "bcrypt";
+import session from "express-session";
+import passport from "passport";
+import { Strategy } from "passport-local";
 import cors from "cors";
-// import http from "http";
-// import { WebSocketServer } from "ws";
 
 const app = express();
-const port = 8000;
+const port = 3000;
 const saltRounds = 6;
 env.config();
 
+// Database Connection
 const db = new pg.Client({
   user: process.env.PG_USER,
   host: process.env.PG_HOST,
@@ -26,212 +24,223 @@ const db = new pg.Client({
 });
 db.connect();
 
+// Middleware
 app.use(express.json());
 app.use(cors({ origin: "http://localhost:5173", credentials: true }));
-app.use(morgan("combined")); //Logger
-app.use(bodyParser.urlencoded({ extended: true })); //Body Parser
-app.use(express.static("./public")); //Static file midlleware
+app.use(morgan("combined"));
+app.use(bodyParser.urlencoded({ extended: true }));
 
 app.use(
   session({
     secret: process.env.SESSION_SECRET,
-    resave: false, //If server goes down I can save sessions to server if need be
-    saveUninitialized: true, //Force saving sessions
-    cookie: {
-      maxAge: 1000 * 60 * 60 * 24, //How long cookie lasts
-    },
+    resave: false,
+    saveUninitialized: true,
+    cookie: { maxAge: 24 * 60 * 60 * 1000 }, // 1 day
   })
 );
 app.use(passport.initialize());
 app.use(passport.session());
 
-app.get("/", (req, res) => {
-  res.send("Hello World");
-});
+// =========================== Authentication Routes ===========================
 
+// Register Route
 app.post("/register", async (req, res) => {
-  if (!req.isAuthenticated()) {
-    // If the user is not authenticated, respond with 401 Unauthorized
-    return res.status(401).json({ error: "Unauthorized" });
-  }
+  const { email, password } = req.body;
 
-  const {
-    username,
-    firstname,
-    lastname,
-    email,
-    password,
-    phone,
-    address,
-    userKind,
-    permissionLevel,
-    branch,
-    title,
-    permissions,
-  } = req.body;
   try {
-    // Check if user already exists by email or username
-    const checkQuery = `
-      SELECT * FROM users
-      WHERE email = $1 OR username = $2
-    `;
-    const checkValues = [email, username];
-    const checkResult = await db.query(checkQuery, checkValues);
-
-    if (checkResult.rows.length > 0) {
-      const existingUser = checkResult.rows[0];
-      if (existingUser.email === email) {
-        return res.status(409).json({ error: "Email is already in use." });
-      }
-      if (existingUser.username === username) {
-        return res.status(409).json({ error: "Username is already taken." });
-      }
-    } else {
-      // Hash the password
-      bcrypt.hash(password, saltRounds, async (err, hash) => {
-        if (err) {
-          console.log("Error hashing password:", err);
-          return res.status(500).json({ error: "Internal Server Error" });
-        } else {
-          // Insert new user into the database
-          const contactinfo = {
-            phone: phone,
-            address,
-          };
-          const result = await db.query(
-            "INSERT INTO users (username, firstname, lastname, email, password, contactinfo, user_kind, permission_level, branch_id, title, permissions) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id, username, firstname, lastname, email",
-            [
-              username,
-              firstname,
-              lastname,
-              email,
-              hash,
-              contactinfo,
-              userKind,
-              permissionLevel,
-              branch,
-              title,
-              permissions,
-            ]
-          );
-          const user = result.rows[0];
-
-          // Notify all WebSocket clients with updated user list
-          await sendDataUpdate(req.user, "users", "SELECT * FROM users", []); // Send user list update
-
-          // Respond with status 201 Created
-          res.status(201).json(user); // Respond with user data
-        }
-      });
+    if (!email || !password) {
+      return res
+        .status(400)
+        .json({ error: "Email and password are required." });
     }
+
+    // Check if email exists
+    const checkResult = await db.query("SELECT * FROM users WHERE email = $1", [
+      email,
+    ]);
+    if (checkResult.rows.length > 0) {
+      return res.status(409).json({ error: "Email already in use." });
+    }
+
+    // Hash password and store user
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+    const insertQuery = `
+      INSERT INTO users (email, password, created_at, updated_at)
+      VALUES ($1, $2, NOW(), NOW())
+      RETURNING id, email, first_name, last_name, phone, play_position, marketing_preferences;
+    `;
+    const result = await db.query(insertQuery, [email, hashedPassword]);
+    const user = result.rows[0];
+
+    req.login(user, (err) => {
+      if (err) {
+        return res
+          .status(500)
+          .json({ error: "Login failed after registration." });
+      }
+      res.status(201).json({ message: "Registration successful", user });
+    });
   } catch (err) {
-    console.log(err);
+    console.error("Registration Error:", err);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
-//Login Route
+// Login Route
 app.post("/login", (req, res, next) => {
   passport.authenticate("local", (err, user, info) => {
     if (err) {
-      return res.sendStatus(500);
+      console.error("❌ Authentication Error:", err);
+      return res.status(500).json({ error: "Internal Server Error" });
     }
     if (!user) {
-      return res.sendStatus(401);
+      console.warn("❌ Authentication Failed:", info);
+      return res.status(401).json({ error: info?.message || "Unauthorized" });
     }
+
     req.login(user, (err) => {
       if (err) {
-        return res.sendStatus(500);
+        console.error("❌ Login Error:", err);
+        return res.status(500).json({ error: "Internal Server Error" });
       }
-      return res.sendStatus(200);
+
+      const responseUser = {
+        id: user.id,
+        first_name: user.first_name || "",
+        last_name: user.last_name || "",
+        email: user.email,
+        phone: user.phone || "",
+        play_position: user.play_position || "",
+        marketing_preferences: user.marketing_preferences || false,
+      };
+
+      console.log(
+        "✅ Sending JSON Response:",
+        JSON.stringify({ message: "Login successful", user: responseUser })
+      );
+
+      return res.status(200).json({
+        message: "Login successful",
+        user: responseUser,
+      });
     });
   })(req, res, next);
 });
 
-//Logout Route
+// Logout Route
 app.get("/logout", (req, res) => {
-  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-  res.setHeader("Pragma", "no-cache");
-  res.setHeader("Expires", "0");
-
   req.logout((err) => {
     if (err) {
-      console.log(err);
-      res.sendStatus(500);
-    } else {
-      res.sendStatus(200);
+      return res.status(500).json({ error: "Logout failed" });
     }
+    res.status(200).json({ message: "Logout successful" });
   });
 });
 
+// Auth Check Route
+app.get("/auth/status", (req, res) => {
+  if (req.isAuthenticated()) {
+    res.status(200).json({ user: req.user });
+  } else {
+    res.status(401).json({ error: "Not authenticated" });
+  }
+});
+
+// =========================== User Management ===========================
+
+// Fetch User by ID
+app.get("/users/:id", async (req, res) => {
+  try {
+    const result = await db.query("SELECT * FROM users WHERE id = $1", [
+      req.params.id,
+    ]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// Update User Preferences
+app.put("/users/:id", async (req, res) => {
+  const { first_name, last_name, phone, play_position, marketing_preferences } =
+    req.body;
+  try {
+    const updateQuery = `
+      UPDATE users 
+      SET first_name = $1, last_name = $2, phone = $3, play_position = $4, marketing_preferences = $5, updated_at = NOW()
+      WHERE id = $6 RETURNING *;
+    `;
+    const result = await db.query(updateQuery, [
+      first_name,
+      last_name,
+      phone,
+      play_position,
+      marketing_preferences,
+      req.params.id,
+    ]);
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// Delete User
+app.delete("/users/:id", async (req, res) => {
+  try {
+    await db.query("DELETE FROM users WHERE id = $1", [req.params.id]);
+    res.status(200).json({ message: "User deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// =========================== Passport Local Strategy ===========================
+
 passport.use(
   "local",
-  new Strategy(async function verify(username, password, cb) {
+  new Strategy({ usernameField: "email" }, async (email, password, done) => {
+    console.log("🚀 Passport Local Strategy Triggered for:", email); // Debugging
+
     try {
       const result = await db.query("SELECT * FROM users WHERE email = $1", [
-        username,
+        email,
       ]);
       if (result.rows.length > 0) {
         const user = result.rows[0];
-        const storedHashedPassword = user.password;
-        bcrypt.compare(password, storedHashedPassword, (err, result) => {
-          if (err) {
-            return cb(err);
-          } else {
-            if (result) {
-              return cb(null, user);
-            } else {
-              return cb(null, false);
-            }
+        console.log("✅ User found:", user);
+
+        bcrypt.compare(password, user.password, (err, isMatch) => {
+          if (err) return done(err);
+          if (isMatch) {
+            console.log("🔐 Password matched, authenticating user...");
+            return done(null, user);
           }
+          console.log("❌ Incorrect password");
+          return done(null, false, { message: "Invalid credentials" });
         });
       } else {
-        return cb("User not found");
+        console.log("❌ User not found in database.");
+        return done(null, false, { message: "User not found" });
       }
     } catch (err) {
-      return cb(err);
+      console.error("⚠️ Error in Local Strategy:", err);
+      return done(err);
     }
   })
 );
 
-passport.use(
-  "google",
-  new GoogleStrategy(
-    {
-      clientID: process.env.GOOGLE_CLIENT_ID,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL: "http://localhost:8000/auth/google/secrets",
-      userProfileURL: "https://www.googleapis.com/oauth2/v3/userinfo",
-    },
-    async (accessToken, refreshToken, profile, cb) => {
-      try {
-        console.log(profile);
-        const result = await db.query("SELECT * FROM users WHERE email = $1", [
-          profile.email,
-        ]);
-        if (result.rows.length === 0) {
-          const newUser = await db.query(
-            "INSERT INTO users (email, password) VALUES ($1, $2)",
-            [profile.email, "google"]
-          );
-          return cb(null, newUser.rows[0]);
-        } else {
-          return cb(null, result.rows[0]);
-        }
-      } catch (err) {
-        return cb(err);
-      }
-    }
-  )
-);
-
-passport.serializeUser((user, cb) => {
-  cb(null, user);
+passport.serializeUser((user, done) => {
+  done(null, user.id);
 });
 
 passport.deserializeUser((user, cb) => {
   cb(null, user);
 });
+
+// =========================== Start Server ===========================
 
 app.listen(port, () => {
   console.log(`Server is running on port ${port}.`);

@@ -6,3 +6,10 @@
 //
 
 import Foundation
+
+struct Notification: Identifiable, Codable {
+    let id: Int
+    let title: String
+    let message: String
+    let timestamp: String
+}
