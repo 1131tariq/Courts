@@ -72,38 +72,6 @@ struct SettingsView: View {
 }
 
 // MARK: - Placeholder Views
-struct EditProfileView: View {
-    var body: some View { Text("Edit Profile") }
-}
-
-struct ActivityView: View {
-    var body: some View { Text("Your Activity") }
-}
-
-struct PaymentsView: View {
-    var body: some View { Text("Your Payments") }
-}
-
-struct AppSettingsView: View {
-    var body: some View { Text("App Settings") }
-}
-
-struct HelpView: View {
-    var body: some View { Text("Help") }
-}
-
-struct HowCourtsWorksView: View {
-    var body: some View { Text("How Courts Works") }
-}
-
-struct TermsOfUseView: View {
-    var body: some View { Text("Terms of Use") }
-}
-
-struct PrivacyPolicyView: View {
-    var body: some View { Text("Privacy Policy") }
-}
-
 #Preview {
     SettingsView()
 }

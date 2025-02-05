@@ -7,12 +7,8 @@
 
 import Foundation
 
-struct Chat: Identifiable {
-    let id = UUID()
-    let name: String
-    let messages: [Message]
-    
-    var lastMessage: Message? {
-        messages.last
-    }
+struct Chat: Identifiable, Codable {
+    let id: Int
+    let participants: [Int] // Stores user IDs instead of name
+    let lastMessage: Message?
 }

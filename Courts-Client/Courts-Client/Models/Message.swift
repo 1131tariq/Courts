@@ -7,9 +7,13 @@
 
 import Foundation
 
-struct Message: Identifiable {
-    let id = UUID()
-    let sender: String
+struct Message: Identifiable, Codable {
+    let id: Int
+    let chatId: Int // ✅ Added this field to match API response
+    let sender: Int
     let content: String
     let timestamp: Date
 }
+
+
+

@@ -8,11 +8,69 @@ import session from "express-session";
 import passport from "passport";
 import { Strategy } from "passport-local";
 import cors from "cors";
+import { WebSocketServer } from "ws";
+import http from "http";
 
 const app = express();
+const server = http.createServer(app); // Attach WebSocket to existing Express server
+const wss = new WebSocketServer({ server });
 const port = 3000;
 const saltRounds = 6;
 env.config();
+
+// Store connected users (socket.id -> userId)
+const users = new Map();
+
+wss.on("connection", (ws) => {
+  console.log("🔗 New WebSocket connection");
+
+  ws.on("message", async (message) => {
+    try {
+      const data = JSON.parse(message);
+
+      if (data.event === "joinChat") {
+        users.set(data.userId, ws);
+        console.log(`✅ User ${data.userId} joined WebSocket`);
+      }
+
+      if (data.event === "sendMessage") {
+        const { chatId, sender, content } = data;
+
+        // Store the message in PostgreSQL
+        await db.query(
+          "INSERT INTO messages (chat_id, sender, content) VALUES ($1, $2, $3)",
+          [chatId, sender, content]
+        );
+
+        // Notify all users in the chat
+        users.forEach((client, userId) => {
+          if (client.readyState === ws.OPEN) {
+            client.send(
+              JSON.stringify({
+                event: "receiveMessage",
+                chatId,
+                sender,
+                content,
+                timestamp: new Date(),
+              })
+            );
+          }
+        });
+
+        console.log(`📩 Message sent in chat ${chatId} by user ${sender}`);
+      }
+    } catch (error) {
+      console.error("Error processing WebSocket message:", error);
+    }
+  });
+
+  ws.on("close", () => {
+    users.forEach((value, key) => {
+      if (value === ws) users.delete(key);
+    });
+    console.log("❌ WebSocket disconnected");
+  });
+});
 
 // Database Connection
 const db = new pg.Client({
@@ -86,7 +144,6 @@ app.post("/register", async (req, res) => {
   }
 });
 
-// Login Route
 app.post("/login", (req, res, next) => {
   passport.authenticate("local", (err, user, info) => {
     if (err) {
@@ -112,6 +169,17 @@ app.post("/login", (req, res, next) => {
         phone: user.phone || "",
         play_position: user.play_position || "",
         marketing_preferences: user.marketing_preferences || false,
+        location: user.location || "",
+        matches: user.matches || 0,
+        followers: user.followers || 0,
+        following: user.following || 0,
+        level: user.level || "Beginner",
+        bestHand: user.bestHand || "Unknown",
+        courtPosition: user.courtPosition || "Not Set",
+        matchType: user.matchType || "Casual",
+        preferredTime: user.preferredTime || "Anytime",
+        playerLevel: user.playerLevel || "Unranked",
+        accountType: user.accountType || "Standard", // Added Account Type
       };
 
       console.log(
@@ -147,6 +215,49 @@ app.get("/auth/status", (req, res) => {
 });
 
 // =========================== User Management ===========================
+
+app.get("/chats", async (req, res) => {
+  try {
+    const chats = await db.query(`
+      SELECT c.id, c.participants, (
+          SELECT jsonb_build_object(
+              'id', m.id, 
+              'sender', m.sender, 
+              'content', m.content, 
+              'timestamp', m.timestamp
+          )
+          FROM messages m 
+          WHERE m.chat_id = c.id 
+          ORDER BY m.timestamp DESC 
+          LIMIT 1
+      ) AS lastMessage
+      FROM chats c;
+    `);
+
+    res.json(chats.rows);
+  } catch (error) {
+    console.error("Error fetching chats:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+app.get("/chats/:chatId/messages", async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const result = await db.query(
+      `SELECT id, chat_id, sender, content, timestamp 
+       FROM messages 
+       WHERE chat_id = $1 
+       ORDER BY timestamp ASC`,
+      [chatId]
+    );
+
+    res.json(result.rows); // ✅ Now includes "chat_id" in the response
+  } catch (error) {
+    console.error("Error fetching messages:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
 
 // Fetch User by ID
 app.get("/users/:id", async (req, res) => {
@@ -242,6 +353,6 @@ passport.deserializeUser((user, cb) => {
 
 // =========================== Start Server ===========================
 
-app.listen(port, () => {
-  console.log(`Server is running on port ${port}.`);
+server.listen(port, () => {
+  console.log(`🚀 Server running on port ${port}`);
 });

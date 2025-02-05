@@ -8,8 +8,17 @@
 import Foundation
 
 struct UserProfile: Codable {
-    let first_name: String?
-    let last_name: String?
-    let email: String
-    
+    var first_name: String?
+    var last_name: String?
+    var email: String?
+    var location: String?
+    var accountType: String
+    var matches: [Int] // List of match IDs
+    var followers: [Int] // List of user IDs
+    var following: [Int] // List of user IDs
+    var playerLevel: String
+    var bestHand: String?
+    var courtPosition: String?
+    var matchType: String?
+    var preferredTime: String?
 }

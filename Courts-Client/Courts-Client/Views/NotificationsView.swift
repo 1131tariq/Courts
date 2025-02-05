@@ -47,14 +47,13 @@ struct NotificationsListView: View {
 }
 
 struct ChatsListView: View {
-    var chats: [Chat] = sampleChats
-
+    @StateObject private var chatViewModel = ChatViewModel()
     
     var body: some View {
-        List(chats) { chat in
-            NavigationLink(destination: ChatDetailView(chat: chat)) {
+        List(chatViewModel.chats) { chat in
+            NavigationLink(destination: ChatDetailView(userId: 18, chatId: chat.id)) {
                 VStack(alignment: .leading) {
-                    Text(chat.name)
+                    Text("Chat with: \(chat.participants.map { String($0) }.joined(separator: ", "))")
                         .font(.headline)
                     Text(chat.lastMessage?.content ?? "No messages yet")
                         .font(.subheadline)
@@ -62,32 +61,67 @@ struct ChatsListView: View {
                 }
             }
         }
+        .onAppear {
+            chatViewModel.fetchChats() // ✅ Fetches chats from the ViewModel
+        }
     }
 }
 
 struct ChatDetailView: View {
-    let chat: Chat
+    @StateObject private var chatViewModel = ChatViewModel()
+    let userId: Int
+    let chatId: Int
+    @State private var messageText = ""
     
     var body: some View {
         VStack {
-            List(chat.messages) { message in
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading) {
-                        Text(message.sender)
-                            .font(.headline)
-                        Text(message.content)
-                            .font(.body)
+            ScrollView {
+                ForEach(chatViewModel.messages) { message in
+                    HStack {
+                        if message.sender == userId {
+                            Spacer()
+                            Text(message.content)
+                                .padding()
+                                .background(Color.blue.opacity(0.8))
+                                .foregroundColor(.white)
+                                .cornerRadius(10)
+                        } else {
+                            Text(message.content)
+                                .padding()
+                                .background(Color.gray.opacity(0.3))
+                                .cornerRadius(10)
+                            Spacer()
+                        }
                     }
-                    Spacer()
-                    Text(message.timestamp, style: .time)
-                        .font(.caption)
-                        .foregroundColor(.gray)
                 }
             }
+            
+            HStack {
+                TextField("Enter message...", text: $messageText)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                
+                Button("Send") {
+                    chatViewModel.sendMessage(chatId: chatId, sender: userId, content: messageText)
+                    messageText = ""
+                }
+                .padding()
+                .background(Color.blue)
+                .foregroundColor(.white)
+                .cornerRadius(8)
+            }
+            .padding()
         }
-        .navigationTitle(chat.name)
+        .onAppear {
+            chatViewModel.fetchMessages(for: chatId)
+            chatViewModel.connectToChat(userId: userId, chatId: chatId)
+        }
+        .onDisappear {
+            chatViewModel.disconnect()
+        }
     }
 }
+
+
 
 // MARK: - Models
 struct NotificationModel: Identifiable {
@@ -102,25 +136,6 @@ let sampleNotifications: [NotificationModel] = [
     NotificationModel(message: "New paddle court available near you!", date: Calendar.current.date(byAdding: .day, value: -1, to: Date())!),
     NotificationModel(message: "A new player has challenged you for a match!", date: Calendar.current.date(byAdding: .day, value: -2, to: Date())!),
 ]
-
-let sampleMessages: [Message] = [
-    Message(sender: "Ali", content: "Hey! Are we still on for our match today?", timestamp: Calendar.current.date(byAdding: .minute, value: -30, to: Date())!),
-    Message(sender: "You", content: "Yes! I'll be there in 15 minutes.", timestamp: Calendar.current.date(byAdding: .minute, value: -10, to: Date())!),
-    Message(sender: "Ali", content: "Great! See you soon.", timestamp: Calendar.current.date(byAdding: .minute, value: -5, to: Date())!),
-    Message(sender: "You", content: "I'm here!", timestamp: Date()),
-]
-
-let sampleChats: [Chat] = [
-    Chat(name: "Ali", messages: sampleMessages),
-    Chat(name: "Omar", messages: [
-        Message(sender: "Omar", content: "Want to team up for the tournament?", timestamp: Calendar.current.date(byAdding: .hour, value: -3, to: Date())!),
-        Message(sender: "You", content: "Sure! Let's register.", timestamp: Calendar.current.date(byAdding: .hour, value: -2, to: Date())!),
-    ]),
-    Chat(name: "Sara", messages: [
-        Message(sender: "Sara", content: "Hey, good game today!", timestamp: Calendar.current.date(byAdding: .day, value: -1, to: Date())!),
-    ])
-]
-
 
 #Preview {
     NotificationsView()

@@ -9,7 +9,9 @@ import SwiftUI
 
 struct ClassesView: View {
     var body: some View {
-        Text(/*@START_MENU_TOKEN@*/"Hello, World!"/*@END_MENU_TOKEN@*/)
+        Text("Classes View")
+            .navigationTitle("Classes")
+            .navigationBarTitleDisplayMode(.inline)
     }
 }
 

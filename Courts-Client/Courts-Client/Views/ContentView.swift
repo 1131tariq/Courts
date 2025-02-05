@@ -7,16 +7,18 @@
 
 import SwiftUI
 
+import SwiftUI
+
 struct ContentView: View {
     @EnvironmentObject var authViewModel: AuthViewModel
     @State private var selectedTab: Tab = .home
-    
+
     enum Tab {
         case home, community, profile
     }
-    
+
     var body: some View {
-        NavigationView {
+        NavigationStack {  // Move NavigationStack here
             VStack(spacing: 0) {
                 HStack {
                     Text(tabTitle(selectedTab))
@@ -36,16 +38,16 @@ struct ContentView: View {
                 }
                 .padding()
                 .background(Color.gray.opacity(0.2))
-                
+
                 TabView(selection: $selectedTab) {
                     HomeView()
                         .tabItem { Label("Home", systemImage: "house") }
                         .tag(Tab.home)
-                    
+
                     CommunityView()
                         .tabItem { Label("Community", systemImage: "person.3") }
                         .tag(Tab.community)
-                    
+
                     ProfileView()
                         .tabItem { Label("Profile", systemImage: "person.crop.circle") }
                         .tag(Tab.profile)
@@ -53,7 +55,7 @@ struct ContentView: View {
             }
         }
     }
-    
+
     func tabTitle(_ tab: Tab) -> String {
         if tab == .home, let user = authViewModel.user {
             return "Hi \(user.first_name ?? "") 👋🏻"
@@ -65,6 +67,11 @@ struct ContentView: View {
         }
     }
 }
+
+#Preview {
+    ContentView()
+}
+
 
 
 #Preview {
