@@ -9,11 +9,13 @@ import Foundation
 
 struct Message: Identifiable, Codable {
     let id: Int
-    let chatId: Int // ✅ Added this field to match API response
+    let chatId: Int
     let sender: Int
     let content: String
-    let timestamp: Date
+    let timestamp: Double  // ✅ Expecting UNIX timestamp
 }
+
+
 
 
 

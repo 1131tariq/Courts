@@ -22,42 +22,62 @@ env.config();
 const users = new Map();
 
 wss.on("connection", (ws) => {
-  console.log("🔗 New WebSocket connection");
+  console.log("🔗 New WebSocket connection established");
 
   ws.on("message", async (message) => {
     try {
+      console.log("📥 Received WebSocket message:", message);
       const data = JSON.parse(message);
+      const userId = String(data.data?.userId); // ✅ Ensure userId is always a String
 
-      if (data.event === "joinChat") {
-        users.set(data.userId, ws);
-        console.log(`✅ User ${data.userId} joined WebSocket`);
-      }
+      if (data.event === "joinChat" && userId) {
+        users.set(userId, ws); // ✅ Store userId as a String
+        console.log(`✅ User ${userId} joined WebSocket`);
+        console.log("📌 Active WebSocket Users:", Array.from(users.keys())); // ✅ Log stored users
+      } else if (data.event === "sendMessage" && userId) {
+        console.log(`📤 Message from user ${userId}:`, data.data);
 
-      if (data.event === "sendMessage") {
-        const { chatId, sender, content } = data;
+        const { chatId, sender, content, timestamp } = data.data;
 
-        // Store the message in PostgreSQL
-        await db.query(
-          "INSERT INTO messages (chat_id, sender, content) VALUES ($1, $2, $3)",
-          [chatId, sender, content]
-        );
+        // ✅ Insert message into database
+        const insertQuery = `
+          INSERT INTO messages (chat_id, sender, content, timestamp)
+          VALUES ($1, $2, $3, TO_TIMESTAMP($4))
+          RETURNING *;
+        `;
 
-        // Notify all users in the chat
-        users.forEach((client, userId) => {
-          if (client.readyState === ws.OPEN) {
-            client.send(
-              JSON.stringify({
-                event: "receiveMessage",
-                chatId,
-                sender,
-                content,
-                timestamp: new Date(),
-              })
-            );
-          }
-        });
+        const result = await db.query(insertQuery, [
+          chatId,
+          sender,
+          content,
+          timestamp,
+        ]);
 
-        console.log(`📩 Message sent in chat ${chatId} by user ${sender}`);
+        console.log("✅ Message saved to DB:", result.rows[0]);
+
+        // ✅ Get chat participants
+        const chatQuery = `SELECT participants FROM chats WHERE id = $1;`;
+        const chatResult = await db.query(chatQuery, [chatId]);
+
+        if (chatResult.rows.length === 0) {
+          console.error("❌ Chat not found!");
+          return;
+        }
+
+        const participants = chatResult.rows[0].participants.map(String); // ✅ Convert participant IDs to Strings
+
+        // ✅ Broadcast message only to chat participants
+        const newMessage = {
+          id: result.rows[0].id,
+          chatId,
+          sender,
+          content,
+          timestamp,
+        };
+
+        broadcastMessageToChat(participants, newMessage);
+      } else {
+        console.warn("⚠️ Missing or invalid userId in WebSocket message", data);
       }
     } catch (error) {
       console.error("Error processing WebSocket message:", error);
@@ -65,12 +85,52 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("close", () => {
+    console.log("❌ WebSocket connection closed");
     users.forEach((value, key) => {
-      if (value === ws) users.delete(key);
+      if (value === ws) {
+        users.delete(key);
+        console.log(`❌ Removed User ${key} from WebSocket map`);
+      }
     });
-    console.log("❌ WebSocket disconnected");
   });
 });
+
+function broadcastMessageToChat(participants, message) {
+  console.log(`📡 Broadcasting message to chat ${message.chatId}:`, message);
+
+  let delivered = 0;
+
+  participants.forEach((participantId) => {
+    const stringParticipantId = String(participantId);
+
+    if (users.has(stringParticipantId)) {
+      const ws = users.get(stringParticipantId);
+      if (ws && ws.readyState === ws.OPEN) {
+        const outgoingMessage = {
+          event: "newMessage",
+          data: message,
+        };
+
+        console.log(
+          `📤 Sending message to user ${stringParticipantId}:`,
+          JSON.stringify(outgoingMessage)
+        );
+
+        ws.send(JSON.stringify(outgoingMessage));
+        delivered++;
+        console.log("sent");
+      } else {
+        console.warn(`⚠️ WebSocket not open for user ${stringParticipantId}`);
+      }
+    } else {
+      console.warn(`⚠️ User ${stringParticipantId} not connected`);
+    }
+  });
+
+  if (delivered === 0) {
+    console.warn("🚨 No active users received the message!");
+  }
+}
 
 // Database Connection
 const db = new pg.Client({
@@ -144,6 +204,7 @@ app.post("/register", async (req, res) => {
   }
 });
 
+// Login Route
 app.post("/login", (req, res, next) => {
   passport.authenticate("local", (err, user, info) => {
     if (err) {
@@ -214,8 +275,58 @@ app.get("/auth/status", (req, res) => {
   }
 });
 
-// =========================== User Management ===========================
+// Update User Profile
+app.put("/update/:id", async (req, res) => {
+  const userId = req.params.id;
+  const {
+    first_name,
+    last_name,
+    email,
+    phone,
+    date_of_birth,
+    gender,
+    location,
+    password,
+  } = req.body;
 
+  try {
+    let query = `
+          UPDATE users 
+          SET first_name = $1, last_name = $2, email = $3, phone = $4, 
+              date_of_birth = $5, gender = $6, location = $7, updated_at = NOW()
+      `;
+    let values = [
+      first_name,
+      last_name,
+      email,
+      phone,
+      date_of_birth,
+      gender,
+      location,
+    ];
+
+    if (password) {
+      const hashedPassword = await bcrypt.hash(password, 10);
+      query += `, password = $8 `;
+      values.push(hashedPassword);
+    }
+
+    query += ` WHERE id = $${values.length + 1} RETURNING *;`;
+    values.push(userId);
+
+    const result = await db.query(query, values);
+    res
+      .status(200)
+      .json({ message: "Profile updated successfully", user: result.rows[0] });
+  } catch (error) {
+    console.error("❌ Error updating profile:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// =========================== User Management =================================
+
+//
 app.get("/chats", async (req, res) => {
   try {
     const chats = await db.query(`
@@ -245,14 +356,26 @@ app.get("/chats/:chatId/messages", async (req, res) => {
   try {
     const { chatId } = req.params;
     const result = await db.query(
-      `SELECT id, chat_id, sender, content, timestamp 
+      `SELECT id, chat_id AS "chatId", sender, content, 
+              EXTRACT(EPOCH FROM timestamp) AS "timestamp"
        FROM messages 
        WHERE chat_id = $1 
        ORDER BY timestamp ASC`,
       [chatId]
     );
 
-    res.json(result.rows); // ✅ Now includes "chat_id" in the response
+    // ✅ Ensure `timestamp` is a Double, not a String
+    const fixedResult = result.rows.map((message) => ({
+      ...message,
+      timestamp: parseFloat(message.timestamp), // ✅ Convert to Double
+    }));
+
+    console.log(
+      "📤 Fixed Messages Response:",
+      JSON.stringify(fixedResult, null, 2)
+    ); // Debug output
+
+    res.json(fixedResult);
   } catch (error) {
     console.error("Error fetching messages:", error);
     res.status(500).json({ error: "Internal Server Error" });
@@ -305,6 +428,162 @@ app.delete("/users/:id", async (req, res) => {
     res.status(200).json({ message: "User deleted successfully" });
   } catch (err) {
     res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// =========================== Courts & Bookings Management ======================
+
+// 🏟 1️⃣ Get All Courts
+app.get("/api/courts", async (req, res) => {
+  try {
+    const result = await db.query(`
+          SELECT id, name, location, 
+          latitude::FLOAT AS latitude, 
+          longitude::FLOAT AS longitude, 
+          open_time, close_time 
+          FROM courts;
+      `);
+
+    console.log("Fetched courts from database:", result.rows); // ✅ Debugging
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Error fetching courts:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// 📅 2️⃣ Get Available Slots for a Court on a Given Date
+app.get("/api/court/:court_id/available-slots", async (req, res) => {
+  try {
+    const { court_id } = req.params;
+    const { date } = req.query;
+
+    console.log(
+      "📡 Fetching available slots for court:",
+      court_id,
+      "Date:",
+      date
+    );
+
+    // Get court opening & closing time
+    const courtResult = await db.query(
+      `SELECT open_time, close_time FROM courts WHERE id = $1;`,
+      [court_id]
+    );
+    if (courtResult.rowCount === 0) {
+      return res.status(404).json({ error: "Court not found" });
+    }
+
+    let open_time = new Date(`${date} ${courtResult.rows[0].open_time}`);
+    let close_time = new Date(`${date} ${courtResult.rows[0].close_time}`);
+
+    // ✅ Fix: If closing time is earlier than opening time, move it to the next day
+    if (close_time < open_time) {
+      close_time.setDate(close_time.getDate() + 1);
+    }
+
+    console.log(
+      "⏳ Court open:",
+      open_time.toISOString(),
+      "| Close:",
+      close_time.toISOString()
+    );
+
+    // Get all booked slots for this court & date
+    const bookings = await db.query(
+      `SELECT start_time, end_time FROM bookings 
+           WHERE court_id = $1 
+           AND start_time >= $2 AND start_time < $3
+           ORDER BY start_time ASC;`,
+      [court_id, open_time.toISOString(), close_time.toISOString()]
+    );
+
+    let booked_slots = bookings.rows;
+    let available_slots = [];
+    let last_end = open_time;
+    let idCounter = 1;
+
+    for (let slot of booked_slots) {
+      let start_time = new Date(slot.start_time);
+
+      if (last_end < start_time) {
+        available_slots.push({
+          id: idCounter++,
+          start_time: last_end.toISOString(),
+          end_time: start_time.toISOString(),
+        });
+      }
+      last_end = new Date(slot.end_time);
+    }
+
+    if (last_end < close_time) {
+      available_slots.push({
+        id: idCounter++,
+        start_time: last_end.toISOString(),
+        end_time: close_time.toISOString(),
+      });
+    }
+
+    console.log("✅ Available slots:", available_slots);
+    res.json(available_slots);
+  } catch (err) {
+    console.error("❌ Error fetching available slots:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ✅ 3️⃣ Book a Slot
+app.post("/api/book-slot", async (req, res) => {
+  try {
+    const { court_id, user_id, start_time, duration } = req.body;
+    const end_time = new Date(
+      new Date(start_time).getTime() + duration * 60000
+    );
+
+    // Check if the requested time overlaps with any existing booking
+    const conflictCheck = await db.query(
+      `SELECT * FROM bookings 
+           WHERE court_id = $1 
+           AND (start_time < $3 AND end_time > $2);`,
+      [court_id, start_time, end_time]
+    );
+
+    if (conflictCheck.rowCount > 0) {
+      return res.status(400).json({ error: "Time slot is already booked." });
+    }
+
+    // Insert the new booking
+    const result = await db.query(
+      `INSERT INTO bookings (court_id, user_id, start_time, end_time)
+           VALUES ($1, $2, $3, $4) RETURNING *;`,
+      [court_id, user_id, start_time, end_time]
+    );
+
+    res.json({ message: "Booking confirmed", booking: result.rows[0] });
+  } catch (err) {
+    console.error("Error booking slot:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// 🚨 4️⃣ Cancel a Booking
+app.delete("/api/cancel-booking/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await db.query(
+      `DELETE FROM bookings WHERE id = $1 RETURNING *;`,
+      [id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    res.json({ message: "Booking canceled", booking: result.rows[0] });
+  } catch (err) {
+    console.error("Error canceling booking:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 

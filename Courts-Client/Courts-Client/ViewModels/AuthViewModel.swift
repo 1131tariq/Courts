@@ -67,8 +67,6 @@ class AuthViewModel: ObservableObject {
         }
     }
 
-
-    
     func register(email: String, password: String) {
             guard let url = URL(string: "http://localhost:3000/register") else { return }
             Task {
@@ -110,4 +108,41 @@ class AuthViewModel: ObservableObject {
             }
         }
     }
+    
+    struct UpdateProfileResponse: Codable {
+        let message: String
+        let user: UserProfile
+    }
+    
+    func updateProfile(data: [String: Any], completion: @escaping () -> Void) {
+            guard let userId = user?.id else { return }
+            guard let url = URL(string: "http://localhost:3000/profile/update/\(userId)") else { return }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "PUT"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+            do {
+                let jsonData = try JSONSerialization.data(withJSONObject: data)
+                request.httpBody = jsonData
+            } catch {
+                print("❌ Error encoding update data:", error)
+                return
+            }
+
+            Task {
+                do {
+                    let (responseData, _) = try await URLSession.shared.data(for: request)
+                    let decodedResponse = try JSONDecoder().decode(UpdateProfileResponse.self, from: responseData)
+
+                    DispatchQueue.main.async {
+                        self.user = decodedResponse.user
+                        completion()
+                        print("✅ Profile updated successfully!")
+                    }
+                } catch {
+                    print("❌ Error updating profile:", error)
+                }
+            }
+        }
 }

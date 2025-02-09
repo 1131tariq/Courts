@@ -4,7 +4,6 @@
 //
 //  Created by Tareq Batayneh on 04/02/2025.
 //
-
 import Foundation
 import Combine
 
@@ -12,8 +11,15 @@ class ChatViewModel: ObservableObject {
     @Published var messages: [Message] = []
     @Published var chats: [Chat] = [] // Store fetched chats
     
-    private var webSocketManager = WebSocketManager()
+    private var webSocketManager: WebSocketManager? // ✅ Prevent multiple WebSocket instances
     private var cancellables = Set<AnyCancellable>()
+
+    func connectToWebSocket(userId: Int) {
+        if webSocketManager == nil {
+            webSocketManager = WebSocketManager()
+            webSocketManager?.connect(userId: String(userId)) // ✅ Ensure WebSocket is connected
+        }
+    }
     
     func fetchMessages(for chatId: Int) {
         guard let url = URL(string: "http://localhost:3000/chats/\(chatId)/messages") else { return }
@@ -24,10 +30,12 @@ class ChatViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink(receiveCompletion: { completion in
                 if case .failure(let error) = completion {
-                    print("Error fetching messages: \(error)")
+                    print("❌ Error fetching messages:", error)
                 }
             }, receiveValue: { [weak self] fetchedMessages in
-                self?.messages = fetchedMessages
+                DispatchQueue.main.async {
+                    self?.messages = fetchedMessages
+                }
             })
             .store(in: &cancellables)
     }
@@ -41,7 +49,7 @@ class ChatViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink(receiveCompletion: { completion in
                 if case .failure(let error) = completion {
-                    print("Error fetching chats: \(error)")
+                    print("❌ Error fetching chats:", error)
                 }
             }, receiveValue: { [weak self] fetchedChats in
                 DispatchQueue.main.async {
@@ -52,27 +60,53 @@ class ChatViewModel: ObservableObject {
     }
     
     func connectToChat(userId: Int, chatId: Int) {
-        webSocketManager.connect(userId: String(userId))
-        webSocketManager.$messages
+        connectToWebSocket(userId: userId) // ✅ Ensure WebSocket is connected before subscribing
+        
+        webSocketManager?.$messages
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] newMessages in
                 DispatchQueue.main.async {
-                    self?.messages = newMessages.filter { $0.chatId == chatId }
+                    for message in newMessages {
+                        if message.chatId == chatId && !(self?.messages.contains(where: { $0.id == message.id }) ?? false) {
+                            self?.messages.append(message) // ✅ Append instead of replacing
+                        }
+                    }
                 }
             }
             .store(in: &cancellables)
     }
+
     
-    func sendMessage(chatId: Int, sender: Int, content: String) {
-        let message = Message(id: Int.random(in: 1000...9999), chatId: chatId, sender: sender, content: content, timestamp: Date())
-        webSocketManager.sendMessage(event: "sendMessage", data: [
-            "chatId": chatId,
-            "sender": sender,
-            "content": content,
-            "timestamp": ISO8601DateFormatter().string(from: message.timestamp)
-        ])
+    func sendMessage(chatId: Int, userId: Int, content: String) {
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            print("⚠️ Cannot send an empty message.")
+            return
+        }
+
+        let message = Message(
+            id: Int.random(in: 1000...9999),
+            chatId: chatId,
+            sender: userId,
+            content: content,
+            timestamp: Date().timeIntervalSince1970
+        )
+
+        let messageData: [String: Any] = [  // ✅ Fixed JSON structure
+            "event": "sendMessage",
+            "data": [
+                "userId": userId,
+                "chatId": chatId,
+                "sender": userId,
+                "content": content,
+                "timestamp": message.timestamp
+            ]
+        ]
+
+        webSocketManager?.sendMessage(data: messageData) // ✅ Ensures message is sent correctly
     }
-    
+
     func disconnect() {
-        webSocketManager.disconnect()
+        webSocketManager?.disconnect()
+        webSocketManager = nil // ✅ Prevents reconnect issues
     }
 }

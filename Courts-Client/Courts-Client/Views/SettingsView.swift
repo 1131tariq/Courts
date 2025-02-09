@@ -30,7 +30,7 @@ struct SettingsView: View {
                 
                 Form {
                     Section(header: Text("Your Account")) {
-                        NavigationLink("Edit Profile", destination: EditProfileView())
+                        NavigationLink("Edit Profile", destination: EditProfileView(authViewModel: authViewModel))
                         NavigationLink("Your Activity", destination: ActivityView())
                         NavigationLink("Your Payments", destination: PaymentsView())
                         NavigationLink("Settings", destination: AppSettingsView())

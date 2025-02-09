@@ -73,7 +73,7 @@ struct ProfileView: View {
                 .padding()
                 
                 HStack(spacing: 20) {
-                    NavigationLink(destination: EditProfileView()) {
+                    NavigationLink(destination: EditProfileView(authViewModel: authViewModel)) {
                         Text("Edit Profile")
                             .padding()
                             .frame(maxWidth: .infinity)

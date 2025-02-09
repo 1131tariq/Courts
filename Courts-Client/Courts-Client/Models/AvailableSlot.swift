@@ -6,3 +6,9 @@
 //
 
 import Foundation
+
+struct AvailableSlot: Identifiable, Codable {
+    let id: Int
+    let start_time: String
+    let end_time: String
+}

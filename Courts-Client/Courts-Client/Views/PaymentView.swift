@@ -8,11 +8,23 @@
 import SwiftUI
 
 struct PaymentView: View {
+    @ObservedObject var viewModel: CourtViewModel
+
     var body: some View {
-        Text(/*@START_MENU_TOKEN@*/"Hello, World!"/*@END_MENU_TOKEN@*/)
+        VStack {
+            Text("Confirm Payment").font(.title)
+            Button("Confirm Booking") {
+                viewModel.bookSlot()
+            }
+            .padding()
+            .background(Color.green)
+            .foregroundColor(.white)
+            .cornerRadius(10)
+        }
     }
 }
 
+
 #Preview {
-    PaymentView()
+    PaymentView(viewModel: CourtViewModel())
 }
